@@ -1,0 +1,43 @@
+[package]
+name = "houdini-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "NAT-side Houdini client: dials the server over WebSocket and proxies tunneled HTTP requests to a local service"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "houdini-client"
+path = "src/main.rs"
+
+[dependencies]
+houdini-protocol = { workspace = true }
+
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures = { workspace = true }
+
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
+
+serde = { workspace = true }
+postcard = { workspace = true }
+toml = { workspace = true }
+clap = { workspace = true }
+url = { workspace = true }
+
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+anyhow = { workspace = true }
+thiserror = { workspace = true }

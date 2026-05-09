@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+*.swp
+.DS_Store
+
+# Local-only secret/config overrides
+*.local.toml
+.env
+.env.*

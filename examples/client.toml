@@ -1,0 +1,26 @@
+# Houdini client configuration.
+#
+# Run this on the NAT'd machine that owns the service you want to expose.
+# The client opens an outbound WebSocket to `server_url`, registers itself
+# as the active tunnel, and forwards every public request the server
+# receives to `local_target`.
+
+# Public WebSocket URL of the server. Use wss:// in production; ws:// is
+# for plaintext local testing only.
+server_url = "wss://tunnel.example.com/_houdini/v1/control"
+
+# Same shared secret as the server's `auth_token`.
+auth_token = "replace-me-with-a-long-random-string"
+
+# Local URL to forward inbound public requests to. The path-and-query of the
+# inbound request is appended to this base, so a base of
+# `http://127.0.0.1:3000/api` plus an inbound `/users/42` becomes a request to
+# `http://127.0.0.1:3000/api/users/42`.
+local_target = "http://127.0.0.1:3000"
+
+# Optional friendly name shown in server logs.
+client_name = "laptop-dev"
+
+# Reconnect backoff (seconds). Doubles up to the max on each failure.
+reconnect_min_secs = 1
+reconnect_max_secs = 30

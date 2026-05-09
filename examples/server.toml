@@ -1,0 +1,23 @@
+# Houdini server configuration.
+#
+# The server listens for plain HTTP on `listen` — TLS is terminated by the
+# upstream HAProxy. HAProxy must be configured to forward both HTTP/1.1 and
+# WebSocket Upgrade traffic to this address.
+#
+# A single client at a time may register on `control_path`; every other path
+# is reverse-proxied through that client to its `local_target`.
+
+# Address HAProxy points at. Bind to localhost if HAProxy is on the same host,
+# or to the Tailscale / private interface for inter-host setups.
+listen = "127.0.0.1:8080"
+
+# Shared secret. Generate with e.g. `openssl rand -hex 32` and keep it private.
+auth_token = "replace-me-with-a-long-random-string"
+
+# Cosmetic. Returned to the client in HelloAck and logged.
+server_name = "houdini-prod"
+
+# WebSocket control endpoint. Anything outside this path is treated as
+# public traffic and reverse-proxied. Pick something obscure so it doesn't
+# collide with the apps you tunnel.
+control_path = "/_houdini/v1/control"
