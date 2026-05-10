@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Instant;
 
 use clap::Parser;
 use eyre::{Result, WrapErr};
@@ -41,10 +42,16 @@ async fn main() -> Result<()> {
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     install_shutdown_handler(shutdown_tx)?;
 
-    let mut backoff = config.min_backoff();
+    let min_backoff = config.min_backoff();
     let max_backoff = config.max_backoff();
+    // A session that lived longer than this is treated as a real, stable run;
+    // its reconnect should restart from the floor instead of inheriting the
+    // accumulated backoff from earlier failures.
+    let stable_threshold = min_backoff * 10;
+    let mut backoff = min_backoff;
 
     loop {
+        let started = Instant::now();
         tokio::select! {
             res = tunnel::run_session(&config) => {
                 match res {
@@ -56,6 +63,10 @@ async fn main() -> Result<()> {
                 tracing::info!("shutdown signal received");
                 return Ok(());
             }
+        }
+
+        if started.elapsed() >= stable_threshold {
+            backoff = min_backoff;
         }
 
         tokio::select! {

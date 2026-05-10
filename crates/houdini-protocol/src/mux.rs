@@ -23,12 +23,14 @@ use std::io;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
+use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::PollSender;
 
 use crate::frame::{Frame, StreamId};
@@ -39,6 +41,10 @@ const OUTBOUND_BACKLOG: usize = 128;
 const PER_STREAM_INBOX: usize = 32;
 /// Maximum payload size of a single Data frame. Larger writes are split.
 const MAX_DATA_CHUNK: usize = 64 * 1024;
+/// Period between outbound liveness pings. Sized to comfortably beat the
+/// typical `HAProxy` `timeout client` / `timeout server` defaults (~50 s) so
+/// an otherwise-idle WebSocket isn't reaped by the upstream proxy.
+const PING_INTERVAL: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy)]
 pub enum Role {
@@ -352,6 +358,12 @@ async fn io_loop<S, E>(
         + 'static,
     E: std::fmt::Display + Send + 'static,
 {
+    let mut ping_ticker = interval(PING_INTERVAL);
+    ping_ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    // Skip the immediate first tick so we don't ping a peer that just came up.
+    ping_ticker.tick().await;
+    let mut ping_token: u32 = 0;
+
     loop {
         tokio::select! {
             outbound = out_rx.recv() => {
@@ -382,6 +394,15 @@ async fn io_loop<S, E>(
                     }
                 };
                 handle_inbound(frame, &streams, &accept_tx, &out_tx).await;
+            }
+            _ = ping_ticker.tick() => {
+                ping_token = ping_token.wrapping_add(1);
+                tracing::trace!(token = ping_token, "mux: send ping");
+                let bytes = Frame::Ping { token: ping_token }.encode();
+                if let Err(err) = transport.send(bytes).await {
+                    tracing::warn!(%err, "mux: ping send failed");
+                    break;
+                }
             }
         }
     }
@@ -453,10 +474,13 @@ async fn handle_inbound(
             }
         }
         Frame::Ping { token } => {
+            tracing::trace!(token, "mux: ping -> pong");
             // Pong is best-effort; if the outbound channel is closed the io
             // loop is already shutting down and will exit on its next tick.
             let _ = out_tx.send(Frame::Pong { token }).await;
         }
-        Frame::Pong { .. } => {}
+        Frame::Pong { token } => {
+            tracing::trace!(token, "mux: recv pong");
+        }
     }
 }
