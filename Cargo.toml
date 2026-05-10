@@ -57,10 +57,22 @@ clap = { version = "4", features = ["derive", "env"] }
 url = { version = "2", features = ["serde"] }
 
 # Errors / logging
-anyhow = "1"
+eyre = "0.6"
+color-eyre = "0.6"
 thiserror = "2"
+displaydoc = "0.2"
 tracing = "0.1"
+tracing-error = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-tree = "0.4"
+
+# Secrets / crypto
+secrecy = { version = "0.10", features = ["serde"] }
+subtle = "2"
+
+# Helpers
+derive-getters = "0.5"
+ctrlc = { version = "3", features = ["termination"] }
 
 # Profile tweaks
 [profile.release]

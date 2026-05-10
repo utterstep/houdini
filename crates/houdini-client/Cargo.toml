@@ -35,9 +35,16 @@ postcard = { workspace = true }
 toml = { workspace = true }
 clap = { workspace = true }
 url = { workspace = true }
+secrecy = { workspace = true }
+derive-getters = { workspace = true }
 
 tracing = { workspace = true }
+tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
+tracing-tree = { workspace = true }
 
-anyhow = { workspace = true }
+eyre = { workspace = true }
+color-eyre = { workspace = true }
+displaydoc = { workspace = true }
 thiserror = { workspace = true }
+ctrlc = { workspace = true }

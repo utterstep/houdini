@@ -6,11 +6,11 @@ use bytes::Bytes;
 use futures::{Sink, Stream};
 
 /// Adapter from axum's [`WebSocket`] to a `Sink<Vec<u8>> + Stream<Item =
-/// Result<Vec<u8>, _>>`, the shape that [`houdini_protocol::Mux`] consumes.
+/// Result<Vec<u8>, _>>` so it can drive [`houdini_protocol::Mux`].
 ///
-/// Inbound non-binary frames (Text, Ping, Pong) are silently dropped.
-/// Outbound payloads are always sent as `Message::Binary`.
-pub struct AxumWsTransport(pub WebSocket);
+/// Inbound non-binary frames (Text, Ping, Pong) are dropped silently; outbound
+/// payloads are always sent as `Message::Binary`.
+pub(crate) struct AxumWsTransport(pub WebSocket);
 
 impl Stream for AxumWsTransport {
     type Item = Result<Vec<u8>, axum::Error>;
@@ -19,13 +19,12 @@ impl Stream for AxumWsTransport {
         loop {
             match Pin::new(&mut self.0).poll_next(cx) {
                 Poll::Pending => return Poll::Pending,
-                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Ready(None | Some(Ok(Message::Close(_)))) => return Poll::Ready(None),
                 Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err))),
                 Poll::Ready(Some(Ok(Message::Binary(bytes)))) => {
                     return Poll::Ready(Some(Ok(bytes.to_vec())));
                 }
-                Poll::Ready(Some(Ok(Message::Close(_)))) => return Poll::Ready(None),
-                Poll::Ready(Some(Ok(_))) => continue,
+                Poll::Ready(Some(Ok(_))) => {}
             }
         }
     }

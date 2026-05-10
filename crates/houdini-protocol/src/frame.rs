@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 /// Identifier for a multiplexed stream. The initiator (server) allocates IDs.
@@ -29,12 +28,5 @@ impl Frame {
 
     pub fn decode(bytes: &[u8]) -> Result<Self, postcard::Error> {
         postcard::from_bytes(bytes)
-    }
-
-    pub(crate) fn data(stream_id: StreamId, payload: Bytes) -> Self {
-        Self::Data {
-            stream_id,
-            payload: payload.to_vec(),
-        }
     }
 }

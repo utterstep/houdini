@@ -1,16 +1,18 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use eyre::{Result, WrapErr};
 use http::{HeaderName, HeaderValue, StatusCode, Uri};
-use http_body_util::{BodyExt, Full, combinators::BoxBody};
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response};
-use hyper_util::client::legacy::{Client, connect::HttpConnector};
+use hyper_util::client::legacy::Client;
+use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use url::Url;
 
-/// Hop-by-hop headers stripped before forwarding (RFC 7230 §6.1).
-static HOP_BY_HOP: &[&str] = &[
+const HOP_BY_HOP: &[&str] = &[
     "connection",
     "keep-alive",
     "proxy-authenticate",
@@ -21,34 +23,33 @@ static HOP_BY_HOP: &[&str] = &[
     "upgrade",
 ];
 
-/// Body type returned from the forwarding service.
-pub type ServiceBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
+pub(crate) type ServiceBody = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 
 /// Forwards inbound tunneled HTTP/1.1 requests to a configured local target.
 ///
-/// Currently HTTP-only (no TLS to the local target). HTTPS local targets are
-/// validated at config load time but not yet implemented here — wire up
-/// `hyper-rustls` here when needed.
-pub struct Forwarder {
+/// HTTP-only for v0.1; HTTPS local targets are accepted at config-load time
+/// but only `HttpConnector` is wired here. Add `hyper-rustls` to extend.
+pub(crate) struct Forwarder {
     target: Url,
     client: Client<HttpConnector, Incoming>,
 }
 
 impl Forwarder {
-    pub fn new(target: Url) -> Self {
+    pub(crate) fn new(target: Url) -> Self {
         let mut connector = HttpConnector::new();
         connector.set_nodelay(true);
         let client = Client::builder(TokioExecutor::new()).build(connector);
         Self { target, client }
     }
 
-    pub async fn handle(self: Arc<Self>, mut req: Request<Incoming>) -> Response<ServiceBody> {
-        match self.rewrite(&mut req) {
-            Ok(()) => {}
-            Err(err) => {
-                tracing::warn!(?err, "tunneled request: bad URI");
-                return error_response(StatusCode::BAD_GATEWAY, "bad upstream URI");
-            }
+    #[tracing::instrument(
+        skip_all,
+        fields(method = %req.method(), path = %req.uri().path()),
+    )]
+    pub(crate) async fn handle(self: Arc<Self>, mut req: Request<Incoming>) -> Response<ServiceBody> {
+        if let Err(report) = self.rewrite(&mut req) {
+            tracing::warn!(?report, "tunneled request: bad URI rewrite");
+            return error_response(StatusCode::BAD_GATEWAY, "bad upstream URI");
         }
 
         match self.client.request(req).await {
@@ -60,14 +61,13 @@ impl Forwarder {
                 Response::from_parts(parts, body)
             }
             Err(err) => {
-                tracing::warn!(?err, "local target request failed");
+                tracing::warn!(?err, target = %self.target, "local target request failed");
                 error_response(StatusCode::BAD_GATEWAY, "local target unreachable")
             }
         }
     }
 
-    fn rewrite(&self, req: &mut Request<Incoming>) -> anyhow::Result<()> {
-        // Strip hop-by-hop headers.
+    fn rewrite(&self, req: &mut Request<Incoming>) -> Result<()> {
         let extra: Vec<HeaderName> = req
             .headers()
             .get("connection")
@@ -91,12 +91,18 @@ impl Forwarder {
             .path_and_query()
             .map_or("/", http::uri::PathAndQuery::as_str);
         let base = self.target.as_str().trim_end_matches('/');
-        let new_uri: Uri = format!("{base}{path_and_query}").parse()?;
+        let new_uri: Uri = format!("{base}{path_and_query}")
+            .parse()
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to build outbound URI for tunneled request (base='{base}', path='{path_and_query}')"
+                )
+            })?;
 
-        if let Some(authority) = new_uri.authority() {
-            if let Ok(value) = HeaderValue::from_str(authority.as_str()) {
-                req.headers_mut().insert(http::header::HOST, value);
-            }
+        if let Some(authority) = new_uri.authority()
+            && let Ok(value) = HeaderValue::from_str(authority.as_str())
+        {
+            req.headers_mut().insert(http::header::HOST, value);
         }
         *req.uri_mut() = new_uri;
 
@@ -104,7 +110,7 @@ impl Forwarder {
     }
 }
 
-pub fn error_response(status: StatusCode, msg: &str) -> Response<ServiceBody> {
+fn error_response(status: StatusCode, msg: &str) -> Response<ServiceBody> {
     let body: ServiceBody = Full::new(Bytes::from(format!("{msg}\n")))
         .map_err(|n| match n {})
         .boxed();
@@ -112,5 +118,5 @@ pub fn error_response(status: StatusCode, msg: &str) -> Response<ServiceBody> {
         .status(status)
         .header("content-type", "text/plain; charset=utf-8")
         .body(body)
-        .expect("static error response")
+        .expect("static error response cannot fail to build")
 }

@@ -27,7 +27,7 @@ use std::task::{Context, Poll};
 use bytes::Bytes;
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{Notify, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::sync::PollSender;
 
@@ -86,8 +86,9 @@ impl Mux {
         let closed = Arc::new(Notify::new());
         let next_id = Arc::new(Mutex::new(match role {
             Role::Initiator => 1u32,
-            // Acceptor side never allocates outbound stream IDs in this design,
-            // but seed something safe anyway.
+            // Acceptor seed is unused (acceptors never allocate outbound IDs),
+            // but pick an even value so `Initiator`/`Acceptor` ID spaces are
+            // disjoint should we ever support both directions.
             Role::Acceptor => 2u32,
         }));
 
@@ -285,8 +286,10 @@ impl AsyncWrite for MuxStream {
         }
 
         let n = std::cmp::min(data.len(), MAX_DATA_CHUNK);
-        let id = self.id;
-        let frame = Frame::data(id, Bytes::copy_from_slice(&data[..n]));
+        let frame = Frame::Data {
+            stream_id: self.id,
+            payload: data[..n].to_vec(),
+        };
         if self.out.send_item(frame).is_err() {
             return Poll::Ready(Err(io::Error::other("mux transport closed")));
         }
@@ -314,6 +317,9 @@ impl AsyncWrite for MuxStream {
             Poll::Ready(Ok(())) => {}
         }
         let id = self.id;
+        // Best-effort Fin: if the channel was closed between reserving and
+        // sending, the peer is already going away and there's nothing to
+        // surface to the caller.
         let _ = self.out.send_item(Frame::Fin { stream_id: id });
         self.write_closed = true;
         self.finished_cleanly = true;
@@ -380,7 +386,8 @@ async fn io_loop<S, E>(
         }
     }
 
-    // Tear down: drop all per-stream senders so readers wake up with EOF.
+    // Best-effort transport close on shutdown — if it errors there's no
+    // reasonable recovery; readers wake via the cleared `streams` map below.
     let _ = transport.close().await;
     streams.lock().expect("streams lock").clear();
     closed.notify_waiters();
@@ -415,14 +422,13 @@ async fn handle_inbound(
                 .expect("streams lock")
                 .get(&stream_id)
                 .cloned();
-            if let Some(tx) = sender {
-                if tx
+            if let Some(tx) = sender
+                && tx
                     .send(InboxMsg::Data(Bytes::from(payload)))
                     .await
                     .is_err()
-                {
-                    streams.lock().expect("streams lock").remove(&stream_id);
-                }
+            {
+                streams.lock().expect("streams lock").remove(&stream_id);
             }
         }
         Frame::Fin { stream_id } => {
@@ -432,6 +438,7 @@ async fn handle_inbound(
                 .get(&stream_id)
                 .cloned();
             if let Some(tx) = sender {
+                // If the local reader has been dropped, the Fin is moot.
                 let _ = tx.send(InboxMsg::Fin).await;
             }
         }
@@ -441,14 +448,15 @@ async fn handle_inbound(
                 .expect("streams lock")
                 .remove(&stream_id);
             if let Some(tx) = sender {
+                // Same: if the reader is gone, drop carries the same signal.
                 let _ = tx.send(InboxMsg::Reset).await;
             }
         }
         Frame::Ping { token } => {
+            // Pong is best-effort; if the outbound channel is closed the io
+            // loop is already shutting down and will exit on its next tick.
             let _ = out_tx.send(Frame::Pong { token }).await;
         }
-        Frame::Pong { .. } => {
-            // Liveness tracking can be added when we add timeouts.
-        }
+        Frame::Pong { .. } => {}
     }
 }

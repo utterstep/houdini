@@ -3,15 +3,15 @@ use std::task::{Context, Poll};
 
 use futures::{Sink, Stream};
 use tokio::net::TcpStream;
-use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-pub type WsClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
+pub(crate) type WsClient = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Adapter from a `tokio-tungstenite` client `WebSocketStream` to a
-/// `Sink<Vec<u8>> + Stream<Item = Result<Vec<u8>, WsError>>`, the shape that
-/// [`houdini_protocol::Mux`] consumes.
-pub struct TungsteniteWsTransport(pub WsClient);
+/// `Sink<Vec<u8>> + Stream<Item = Result<Vec<u8>, WsError>>` so it can drive
+/// [`houdini_protocol::Mux`].
+pub(crate) struct TungsteniteWsTransport(pub WsClient);
 
 impl Stream for TungsteniteWsTransport {
     type Item = Result<Vec<u8>, WsError>;
@@ -20,14 +20,12 @@ impl Stream for TungsteniteWsTransport {
         loop {
             match Pin::new(&mut self.0).poll_next(cx) {
                 Poll::Pending => return Poll::Pending,
-                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Ready(None | Some(Ok(Message::Close(_)))) => return Poll::Ready(None),
                 Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err))),
                 Poll::Ready(Some(Ok(Message::Binary(bytes)))) => {
-                    return Poll::Ready(Some(Ok(bytes.to_vec())));
+                    return Poll::Ready(Some(Ok(bytes)));
                 }
-                Poll::Ready(Some(Ok(Message::Close(_)))) => return Poll::Ready(None),
-                // Skip Text / Ping / Pong / Frame silently.
-                Poll::Ready(Some(Ok(_))) => continue,
+                Poll::Ready(Some(Ok(_))) => {}
             }
         }
     }
