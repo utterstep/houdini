@@ -30,7 +30,7 @@ must_use_candidate = "allow"
 houdini-protocol = { path = "crates/houdini-protocol", version = "0.1.0" }
 
 # Async runtime
-tokio = { version = "1.40", features = ["full"] }
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
 tokio-util = { version = "0.7", features = ["io", "codec"] }
 futures = "0.3"
 
@@ -38,9 +38,9 @@ futures = "0.3"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
 
 # HTTP
-axum = { version = "0.8", features = ["ws", "http1", "http2", "macros"] }
+axum = { version = "0.8", features = ["ws", "http1"] }
 hyper = { version = "1", features = ["http1", "client", "server"] }
-hyper-util = { version = "0.1", features = ["tokio", "client", "client-legacy", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "client", "client-legacy"] }
 http = "1"
 http-body = "1"
 http-body-util = "0.1"
@@ -76,6 +76,7 @@ ctrlc = { version = "3", features = ["termination"] }
 
 # Profile tweaks
 [profile.release]
-lto = "thin"
+lto = "fat"
 codegen-units = 1
+panic = "abort"
 strip = "symbols"
