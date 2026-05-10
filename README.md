@@ -54,29 +54,37 @@ mux. Plain HTTP/1.1 request-response is fully supported.
 
 ## Install
 
-### Pre-built (x86_64 Linux, statically linked against musl)
+### Pre-built binaries
 
-For tag-based releases, both binaries are attached to the GitHub release as a
-single tarball plus a sha256 file:
+Each tagged release attaches per-target tarballs and matching sha256 files to
+the GitHub release. Currently built:
+
+| Target                          | When to pick it                                                  |
+|---------------------------------|------------------------------------------------------------------|
+| `x86_64-unknown-linux-musl`     | Static-pie, no glibc dep — deploys to any modern x86_64 Linux. The default for tiny VPS instances; server idles fine under 128 MiB RAM. |
+| `x86_64-unknown-linux-gnu`      | Dynamically linked against glibc — slightly smaller, native on most distros. |
+| `aarch64-apple-darwin`          | Apple silicon (M-series) Macs.                                   |
 
 ```sh
+target=x86_64-unknown-linux-musl   # or x86_64-unknown-linux-gnu, aarch64-apple-darwin
 ver=v0.1.0
-curl -sSLO "https://github.com/utterstep/houdini/releases/download/${ver}/houdini-${ver}-x86_64-unknown-linux-musl.tar.gz"
-curl -sSLO "https://github.com/utterstep/houdini/releases/download/${ver}/houdini-${ver}-x86_64-unknown-linux-musl.tar.gz.sha256"
-sha256sum -c "houdini-${ver}-x86_64-unknown-linux-musl.tar.gz.sha256"
-tar -xzf "houdini-${ver}-x86_64-unknown-linux-musl.tar.gz"
-sudo install -m 0755 "houdini-${ver}-x86_64-unknown-linux-musl/houdini-server" /usr/local/bin/
-sudo install -m 0755 "houdini-${ver}-x86_64-unknown-linux-musl/houdini-client" /usr/local/bin/
+
+curl -sSLO "https://github.com/utterstep/houdini/releases/download/${ver}/houdini-${ver}-${target}.tar.gz"
+curl -sSLO "https://github.com/utterstep/houdini/releases/download/${ver}/houdini-${ver}-${target}.tar.gz.sha256"
+sha256sum -c "houdini-${ver}-${target}.tar.gz.sha256"   # `shasum -a 256 -c` on macOS
+tar -xzf "houdini-${ver}-${target}.tar.gz"
+sudo install -m 0755 "houdini-${ver}-${target}/houdini-server" /usr/local/bin/
+sudo install -m 0755 "houdini-${ver}-${target}/houdini-client" /usr/local/bin/
 ```
 
-The binaries are static-pie ELFs with no glibc / libssl / etc dependency, so
-they run on any reasonably modern x86_64 Linux. Tested as the deploy target
-for tiny VPS instances; the server is comfortable under 128 MiB RAM idle.
+On macOS, Gatekeeper will quarantine the unsigned binary the first time you
+try to run it. Either right-click → Open in Finder, or strip the attribute
+manually: `xattr -d com.apple.quarantine /usr/local/bin/houdini-*`.
 
 The release workflow also accepts a manual `workflow_dispatch` run; the
-resulting binaries are uploaded as a workflow artifact named
-`houdini-dev-<sha>-x86_64-unknown-linux-musl` so untagged builds are
-fetchable from the GHA run page.
+resulting binaries are uploaded per-target as workflow artifacts named
+`houdini-dev-<sha>-<target>` so untagged builds are fetchable from the GHA
+run page.
 
 ### From source
 
