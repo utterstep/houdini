@@ -15,41 +15,58 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  build-musl:
-    name: Build x86_64-unknown-linux-musl
-    runs-on: ubuntu-24.04
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+          - target: aarch64-apple-darwin
+            os: macos-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Install musl tools
+        if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends musl-tools
 
-      - name: Install Rust 1.95 with musl target
+      - name: Install Rust 1.95
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: '1.95'
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo registry & target
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: musl-x86_64
+          shared-key: ${{ matrix.target }}
 
       - name: Build release binaries
-        env:
-          CC_x86_64_unknown_linux_musl: musl-gcc
-          AR_x86_64_unknown_linux_musl: ar
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
-        run: cargo build --release --workspace --target x86_64-unknown-linux-musl --bins
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.target }}" == "x86_64-unknown-linux-musl" ]]; then
+            export CC_x86_64_unknown_linux_musl=musl-gcc
+            export AR_x86_64_unknown_linux_musl=ar
+            export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc
+          fi
+          cargo build --release --workspace --target "${{ matrix.target }}" --bins
 
-      - name: Verify static linkage
+      - name: Verify static linkage (musl only)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           set -euo pipefail
           for bin in houdini-server houdini-client; do
-            path="target/x86_64-unknown-linux-musl/release/${bin}"
+            path="target/${{ matrix.target }}/release/${bin}"
             file "${path}"
             file "${path}" | grep -qE 'statically linked|static-pie linked' \
               || { echo "::error::${bin} is not statically linked"; ldd "${path}" 2>&1; exit 1; }
@@ -57,6 +74,7 @@ jobs:
 
       - name: Determine asset version
         id: ver
+        shell: bash
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             echo "version=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
@@ -68,19 +86,25 @@ jobs:
 
       - name: Package
         id: package
+        shell: bash
         run: |
           set -euo pipefail
           version="${{ steps.ver.outputs.version }}"
-          name="houdini-${version}-x86_64-unknown-linux-musl"
+          target="${{ matrix.target }}"
+          name="houdini-${version}-${target}"
           workdir="$(mktemp -d)"
           stage="${workdir}/${name}"
           mkdir -p "${stage}"
-          cp target/x86_64-unknown-linux-musl/release/houdini-server "${stage}/"
-          cp target/x86_64-unknown-linux-musl/release/houdini-client "${stage}/"
+          cp "target/${target}/release/houdini-server" "${stage}/"
+          cp "target/${target}/release/houdini-client" "${stage}/"
           cp examples/server.toml examples/client.toml README.md "${stage}/"
           mkdir -p dist
           tar -C "${workdir}" -czf "dist/${name}.tar.gz" "${name}"
-          (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          else
+            (cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          fi
           ls -la dist/
           echo "name=${name}" >> "${GITHUB_OUTPUT}"
 
