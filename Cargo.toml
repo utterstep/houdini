@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -36,6 +36,10 @@ futures = "0.3"
 
 # WebSocket
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# tokio-tungstenite enables rustls but does not select a CryptoProvider.
+# Pull rustls explicitly with the `ring` provider so it auto-installs at
+# startup; otherwise rustls panics on the first wss:// dial.
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 
 # HTTP
 axum = { version = "0.8", features = ["ws", "http1"] }

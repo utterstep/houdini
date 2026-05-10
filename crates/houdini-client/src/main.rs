@@ -27,6 +27,11 @@ async fn main() -> Result<()> {
     color_eyre::install().wrap_err("Failed to install color-eyre report hook")?;
     init_tracing();
 
+    // Pre-install ring as the default rustls CryptoProvider. rustls auto-installs
+    // when exactly one provider feature is enabled, but doing it eagerly avoids
+    // a runtime panic if any future dep bumps that invariant.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let cli = Cli::parse();
     let config = ClientConfig::load(&cli.config)
         .wrap_err_with(|| format!("Failed to load client config from '{}'", cli.config.display()))?;
