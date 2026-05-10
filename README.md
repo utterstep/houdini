@@ -73,7 +73,8 @@ houdini-server --config /etc/houdini/server.toml
 
 See `examples/server.toml` for the full config schema. Make sure HAProxy
 is configured to forward both regular HTTP/1.1 and WebSocket upgrades to
-the `listen` address.
+the `listen` address. The config path can also be supplied via
+`HOUDINI_SERVER_CONFIG`.
 
 Client, on the NAT'd machine:
 
@@ -81,7 +82,26 @@ Client, on the NAT'd machine:
 houdini-client --config ~/.config/houdini/client.toml
 ```
 
-See `examples/client.toml`.
+Env-var fallback: `HOUDINI_CLIENT_CONFIG`. See `examples/client.toml`.
+
+### Logging
+
+Both binaries emit hierarchical spans via `tracing-tree`. Filter with
+`RUST_LOG`:
+
+```sh
+RUST_LOG=houdini_server=debug,houdini_protocol=info houdini-server …
+```
+
+Defaults are `info` for `houdini_*` targets. The bearer token is wrapped
+in `secrecy::SecretString` and is never written to logs.
+
+### Shutdown
+
+Both binaries install a `ctrlc` handler that fires on Ctrl+C and SIGTERM.
+The server stops accepting new connections and drains in-flight requests
+through `axum`'s graceful shutdown; the client breaks out of its
+reconnect loop.
 
 ## HAProxy snippet
 
