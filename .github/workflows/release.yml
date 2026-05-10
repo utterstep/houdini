@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-musl:
+    name: Build x86_64-unknown-linux-musl
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install musl tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools
+
+      - name: Install Rust 1.95 with musl target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95'
+          targets: x86_64-unknown-linux-musl
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: musl-x86_64
+
+      - name: Build release binaries
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          AR_x86_64_unknown_linux_musl: ar
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo build --release --workspace --target x86_64-unknown-linux-musl --bins
+
+      - name: Verify static linkage
+        run: |
+          set -euo pipefail
+          for bin in houdini-server houdini-client; do
+            path="target/x86_64-unknown-linux-musl/release/${bin}"
+            file "${path}"
+            file "${path}" | grep -qE 'statically linked|static-pie linked' \
+              || { echo "::error::${bin} is not statically linked"; ldd "${path}" 2>&1; exit 1; }
+          done
+
+      - name: Determine asset version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+            echo "is_release=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "version=dev-$(git rev-parse --short HEAD)" >> "${GITHUB_OUTPUT}"
+            echo "is_release=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Package
+        id: package
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.version }}"
+          name="houdini-${version}-x86_64-unknown-linux-musl"
+          workdir="$(mktemp -d)"
+          stage="${workdir}/${name}"
+          mkdir -p "${stage}"
+          cp target/x86_64-unknown-linux-musl/release/houdini-server "${stage}/"
+          cp target/x86_64-unknown-linux-musl/release/houdini-client "${stage}/"
+          cp examples/server.toml examples/client.toml README.md "${stage}/"
+          mkdir -p dist
+          tar -C "${workdir}" -czf "dist/${name}.tar.gz" "${name}"
+          (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          ls -la dist/
+          echo "name=${name}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload as workflow artifact (manual runs)
+        if: steps.ver.outputs.is_release == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach to GitHub release (tag pushes)
+        if: steps.ver.outputs.is_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+          generate_release_notes: true
+          fail_on_unmatched_files: true

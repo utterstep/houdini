@@ -52,7 +52,33 @@ public users running WebSocket clients against the tunneled service) is
 not yet supported because hyper http1 upgrades aren't bridged across the
 mux. Plain HTTP/1.1 request-response is fully supported.
 
-## Build
+## Install
+
+### Pre-built (x86_64 Linux, statically linked against musl)
+
+For tag-based releases, both binaries are attached to the GitHub release as a
+single tarball plus a sha256 file:
+
+```sh
+ver=v0.1.0
+curl -sSLO "https://github.com/utterstep/houdini/releases/download/${ver}/houdini-${ver}-x86_64-unknown-linux-musl.tar.gz"
+curl -sSLO "https://github.com/utterstep/houdini/releases/download/${ver}/houdini-${ver}-x86_64-unknown-linux-musl.tar.gz.sha256"
+sha256sum -c "houdini-${ver}-x86_64-unknown-linux-musl.tar.gz.sha256"
+tar -xzf "houdini-${ver}-x86_64-unknown-linux-musl.tar.gz"
+sudo install -m 0755 "houdini-${ver}-x86_64-unknown-linux-musl/houdini-server" /usr/local/bin/
+sudo install -m 0755 "houdini-${ver}-x86_64-unknown-linux-musl/houdini-client" /usr/local/bin/
+```
+
+The binaries are static-pie ELFs with no glibc / libssl / etc dependency, so
+they run on any reasonably modern x86_64 Linux. Tested as the deploy target
+for tiny VPS instances; the server is comfortable under 128 MiB RAM idle.
+
+The release workflow also accepts a manual `workflow_dispatch` run; the
+resulting binaries are uploaded as a workflow artifact named
+`houdini-dev-<sha>-x86_64-unknown-linux-musl` so untagged builds are
+fetchable from the GHA run page.
+
+### From source
 
 Requires Rust 1.95+ (pinned via `rust-toolchain.toml`).
 
@@ -62,6 +88,16 @@ cargo build --release --workspace
 
 The release artifacts are at `target/release/houdini-server` and
 `target/release/houdini-client`.
+
+To reproduce the musl build locally:
+
+```sh
+sudo apt-get install -y musl-tools
+rustup target add x86_64-unknown-linux-musl
+CC_x86_64_unknown_linux_musl=musl-gcc \
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc \
+cargo build --release --workspace --target x86_64-unknown-linux-musl --bins
+```
 
 ## Run
 
