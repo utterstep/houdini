@@ -78,10 +78,8 @@ jobs:
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             echo "version=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
-            echo "is_release=true" >> "${GITHUB_OUTPUT}"
           else
             echo "version=dev-$(git rev-parse --short HEAD)" >> "${GITHUB_OUTPUT}"
-            echo "is_release=false" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Package
@@ -108,8 +106,7 @@ jobs:
           ls -la dist/
           echo "name=${name}" >> "${GITHUB_OUTPUT}"
 
-      - name: Upload as workflow artifact (manual runs)
-        if: steps.ver.outputs.is_release == 'false'
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package.outputs.name }}
@@ -119,8 +116,21 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Attach to GitHub release (tag pushes)
-        if: steps.ver.outputs.is_release == 'true'
+  release:
+    name: Publish GitHub release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release with consolidated notes
         uses: softprops/action-gh-release@v2
         with:
           files: |
